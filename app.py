@@ -16,7 +16,7 @@ st.markdown("Run thousands of synthetic shoppers against your Amazon listings in
 # SIDEBAR: API KEY & SETTINGS
 # ==========================================
 with st.sidebar:
-    st.header("️ Settings")
+    st.header("⚙️ Settings")
     api_key = st.text_input("OpenAI API Key", type="password", help="Your key starts with sk-...")
     test_type = st.radio("What do you want to test?", ["Bullet Points", "Title"], horizontal=True)
     persona_count = st.slider("Number of Personas", 50, 1000, 100, step=50)
@@ -90,7 +90,7 @@ else:
 # ==========================================
 # RUN SIMULATION
 # ==========================================
-if st.button("🚀 Run Synthetic Test", type="primary", use_container_width=True):
+if st.button(" Run Synthetic Test", type="primary", use_container_width=True):
     if not api_key.startswith("sk-"):
         st.error("Please enter a valid OpenAI API Key in the sidebar.")
     elif not content_a.strip() or not content_b.strip():
@@ -146,12 +146,12 @@ if st.button("🚀 Run Synthetic Test", type="primary", use_container_width=True
 
         for persona_obj in personas:
             persona_text = persona_obj.get("persona", "Unknown shopper")
-            price_sens = persona_obj.get("price_sensitivity", "Medium")
+            price_sens = persona_obj.get("price_sensitivity", "Medium") # Fixed variable name
             
             for variant in variants:
                 # STRONGER LOGIC PROMPT
                 prompt = f"""You are an Amazon shopper: {persona_text}
-                Your shopping trait: You are '{price_sensitivity}' price sensitive. 
+                Your shopping trait: You are '{price_sens}' price sensitive. 
                 
                 IMPORTANT CONTEXT: You are looking at an A/B test for the EXACT SAME physical product. The quality, reviews, and shipping are identical. The only differences are the marketing copy and the price.
                 
