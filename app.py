@@ -9,9 +9,15 @@ from fpdf import FPDF
 import datetime
 
 # ==========================================
-# PAGE CONFIGURATION
+# PAGE CONFIGURATION & SESSION STATE
 # ==========================================
-st.set_page_config(page_title="Amazon Full-Funnel Simulator", layout="wide", page_icon="🛒")
+st.set_page_config(page_title="Amazon Full-Funnel Simulator", layout="wide", page_icon="")
+
+# Initialize session state to survive page refreshes
+if 'pdf_bytes' not in st.session_state:
+    st.session_state['pdf_bytes'] = None
+if 'last_metrics' not in st.session_state:
+    st.session_state['last_metrics'] = None
 
 st.title("🛒 Amazon Full-Funnel SERP & PDP Simulator")
 st.markdown("Simulate the entire customer journey: From Search Results (SEO/CTR) to Product Page (Conversion).")
@@ -58,10 +64,20 @@ def scrape_amazon(url):
         return full_title, bullets[:5] 
     except: return "", []
 
+def strip_emojis(text):
+    # fpdf crashes on emojis, so we remove them for the PDF
+    emoji_pattern = re.compile("["
+        u"\U0001F600-\U0001F64F"
+        u"\U0001F300-\U0001F5FF"
+        u"\U0001F680-\U0001F6FF"
+        u"\U0001F1E0-\U0001F1FF"
+        "]+", flags=re.UNICODE)
+    return emoji_pattern.sub(r'', str(text))
+
 # ==========================================
 # MAIN INPUTS
 # ==========================================
-st.subheader(" Pricing & Target Keywords")
+st.subheader("💰 Pricing & Target Keywords")
 col_p1, col_p2 = st.columns(2)
 with col_p1: a_price = st.text_input("Price (Variant A)", value="$37.61")
 with col_p2: b_price = st.text_input("Price (Variant B)", value="$29.99")
@@ -109,20 +125,20 @@ if test_type == "Title":
         st.subheader("📝 Current Title (Variant A)")
         a_title = st.text_area("Title A", height=100, value=st.session_state['scraped_title'])
     with col2:
-        st.subheader(" Test Title (Variant B)")
+        st.subheader("🧪 Test Title (Variant B)")
         b_title = st.text_area("Title B", height=100)
     content_a = a_title; content_b = b_title; content_label = "TITLE"
 
 elif test_type == "Bullet Points":
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("📝 Current Bullets (Variant A)")
+        st.subheader(" Current Bullets (Variant A)")
         a_b1 = st.text_area("Bullet 1", height=60, value=st.session_state['scraped_bullets'][0])
         a_b2 = st.text_area("Bullet 2", height=60, value=st.session_state['scraped_bullets'][1])
         a_b3 = st.text_area("Bullet 3", height=60, value=st.session_state['scraped_bullets'][2])
         a_b4 = st.text_area("Bullet 4", height=60, value=st.session_state['scraped_bullets'][3])
         a_b5 = st.text_area("Bullet 5", height=60, value=st.session_state['scraped_bullets'][4])
-        content_a = "\n".join([f"• {b}" for b in [a_b1, a_b2, a_b3, a_b4, a_b5] if b.strip()])
+        content_a = "\n".join([f"- {b}" for b in [a_b1, a_b2, a_b3, a_b4, a_b5] if b.strip()])
     with col2:
         st.subheader("🧪 Test Bullets (Variant B)")
         b_b1 = st.text_area("Bullet 1", height=60, key="b1")
@@ -130,7 +146,7 @@ elif test_type == "Bullet Points":
         b_b3 = st.text_area("Bullet 3", height=60, key="b3")
         b_b4 = st.text_area("Bullet 4", height=60, key="b4")
         b_b5 = st.text_area("Bullet 5", height=60, key="b5")
-        content_b = "\n".join([f"• {b}" for b in [b_b1, b_b2, b_b3, b_b4, b_b5] if b.strip()])
+        content_b = "\n".join([f"- {b}" for b in [b_b1, b_b2, b_b3, b_b4, b_b5] if b.strip()])
     content_label = "KEY FEATURES"
 else: 
     st.subheader("📝 Current Listing (Variant A)")
@@ -140,7 +156,7 @@ else:
     a_b3 = st.text_area("Bullet 3", height=60, value=st.session_state['scraped_bullets'][2])
     a_b4 = st.text_area("Bullet 4", height=60, value=st.session_state['scraped_bullets'][3])
     a_b5 = st.text_area("Bullet 5", height=60, value=st.session_state['scraped_bullets'][4])
-    content_a = f"TITLE: {a_title}\n\nBULLET POINTS:\n" + "\n".join([f"• {b}" for b in [a_b1, a_b2, a_b3, a_b4, a_b5] if b.strip()])
+    content_a = f"TITLE: {a_title}\n\nBULLET POINTS:\n" + "\n".join([f"- {b}" for b in [a_b1, a_b2, a_b3, a_b4, a_b5] if b.strip()])
 
     st.subheader("🧪 Test Listing (Variant B)")
     b_title = st.text_area("Title B", height=100, key="b_title")
@@ -149,13 +165,13 @@ else:
     b_b3 = st.text_area("Bullet 3", height=60, key="b3")
     b_b4 = st.text_area("Bullet 4", height=60, key="b4")
     b_b5 = st.text_area("Bullet 5", height=60, key="b5")
-    content_b = f"TITLE: {b_title}\n\nBULLET POINTS:\n" + "\n".join([f"• {b}" for b in [b_b1, b_b2, b_b3, b_b4, b_b5] if b.strip()])
+    content_b = f"TITLE: {b_title}\n\nBULLET POINTS:\n" + "\n".join([f"- {b}" for b in [b_b1, b_b2, b_b3, b_b4, b_b5] if b.strip()])
     content_label = "LISTING DETAILS"
 
 # ==========================================
 # RUN FULL-FUNNEL SIMULATION
 # ==========================================
-if st.button("🚀 Run Full-Funnel Simulation", type="primary", use_container_width=True):
+if st.button(" Run Full-Funnel Simulation", type="primary", use_container_width=True):
     if not api_key.startswith("sk-"): st.error("Please enter a valid OpenAI API Key.")
     elif not content_a.strip() or not content_b.strip(): st.error("Please enter content for both variants.")
     else:
@@ -191,7 +207,7 @@ if st.button("🚀 Run Full-Funnel Simulation", type="primary", use_container_wi
         seo_summary = df_seo.groupby('Variant')[['SEO_Score', 'CTR_Score']].mean().round(1)
 
         # --- PHASE 2: PDP CONVERSION SIMULATION ---
-        st.markdown("###  Phase 2: Simulating Product Page (PDP) Conversion")
+        st.markdown("### 🛒 Phase 2: Simulating Product Page (PDP) Conversion")
         with st.spinner(f"🤖 Generating {persona_count} synthetic shoppers..."):
             personas = []
             batch_size = 25 
@@ -244,7 +260,7 @@ if st.button("🚀 Run Full-Funnel Simulation", type="primary", use_container_wi
                 progress_bar.progress(current_task / total_tasks)
                 status_text.text(f"Processing shopper {current_task} of {total_tasks}...")
 
-        # --- FINAL ANALYSIS & DISPLAY ---
+        # --- FINAL ANALYSIS & PDF GENERATION ---
         status_text.text("✅ Simulation complete! Calculating Full-Funnel Impact...")
         df_cvr = pd.DataFrame(results)
         cvr_summary = df_cvr.groupby('Variant').agg(
@@ -260,71 +276,83 @@ if st.button("🚀 Run Full-Funnel Simulation", type="primary", use_container_wi
         b_sales = final_metrics.loc['Variant B', 'Projected_Sales_Index']
         total_lift = ((b_sales - a_sales) / a_sales * 100).round(2) if a_sales > 0 else 0
 
-        st.markdown("### 📊 FULL-FUNNEL EXECUTIVE SUMMARY")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Avg SEO Score", f"{final_metrics.loc['Variant B', 'SEO_Score']}/100", f"{final_metrics.loc['Variant B', 'SEO_Score'] - final_metrics.loc['Variant A', 'SEO_Score']:+.1f} vs A")
-        col2.metric("Avg CTR Score", f"{final_metrics.loc['Variant B', 'CTR_Score']}/100", f"{final_metrics.loc['Variant B', 'CTR_Score'] - final_metrics.loc['Variant A', 'CTR_Score']:+.1f} vs A")
-        col3.metric("PDP Conv. Rate", f"{final_metrics.loc['Variant B', 'CVR (%)']}%", f"{final_metrics.loc['Variant B', 'CVR (%)'] - final_metrics.loc['Variant A', 'CVR (%)']:+.2f}% vs A")
-        col4.metric("Total Sales Lift", f"{total_lift:+.2f}%", "CTR × CVR Impact")
+        # Save to session state so it survives the download button click
+        st.session_state['last_metrics'] = {
+            'final_metrics': final_metrics,
+            'total_lift': total_lift,
+            'df_seo': df_seo
+        }
 
-        if total_lift > 5: st.success("✅ **DEPLOY VARIANT B** - Strong positive signal across the full funnel.")
-        elif total_lift > 0: st.warning("️ **MARGINAL IMPROVEMENT** - Consider testing on Amazon.")
-        else: st.error("❌ **STICK WITH VARIANT A** - Test variant underperformed.")
-
-        st.markdown("### 🔍 Keyword-by-Keyword SERP Breakdown")
-        st.dataframe(df_seo)
+        # Generate PDF immediately and save to session state
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
         
-        # --- PDF GENERATION ---
-        def create_pdf():
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=12)
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "Amazon Full-Funnel Simulation Report", ln=True, align='C')
+        pdf.set_font("Arial", size=10)
+        pdf.cell(0, 10, f"Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
+        pdf.ln(10)
+        
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, "Executive Summary (Variant B)", ln=True)
+        pdf.set_font("Arial", size=11)
+        pdf.cell(0, 8, f"Avg SEO Score: {final_metrics.loc['Variant B', 'SEO_Score']}/100", ln=True)
+        pdf.cell(0, 8, f"Avg CTR Score: {final_metrics.loc['Variant B', 'CTR_Score']}/100", ln=True)
+        pdf.cell(0, 8, f"PDP Conversion Rate: {final_metrics.loc['Variant B', 'CVR (%)']}%", ln=True)
+        pdf.cell(0, 8, f"Total Projected Sales Lift: {total_lift:+.2f}%", ln=True)
+        pdf.ln(10)
+        
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, "Keyword-by-Keyword SERP Breakdown", ln=True)
+        pdf.set_font("Arial", size=9)
+        
+        pdf.set_fill_color(200, 220, 255)
+        pdf.cell(40, 8, "Keyword", 1, 0, 'C', True)
+        pdf.cell(30, 8, "Variant", 1, 0, 'C', True)
+        pdf.cell(20, 8, "SEO", 1, 0, 'C', True)
+        pdf.cell(20, 8, "CTR", 1, 0, 'C', True)
+        pdf.cell(70, 8, "Reason", 1, 1, 'C', True)
+        
+        for index, row in df_seo.iterrows():
+            reason = strip_emojis(str(row['Reason']))[:45] + "..." if len(str(row['Reason'])) > 45 else strip_emojis(str(row['Reason']))
+            pdf.cell(40, 8, strip_emojis(str(row['Keyword']))[:20], 1, 0, 'L')
+            pdf.cell(30, 8, str(row['Variant']), 1, 0, 'L')
+            pdf.cell(20, 8, str(row['SEO_Score']), 1, 0, 'C')
+            pdf.cell(20, 8, str(row['CTR_Score']), 1, 0, 'C')
+            pdf.cell(70, 8, reason, 1, 1, 'L')
             
-            # Header
-            pdf.set_font("Arial", 'B', 16)
-            pdf.cell(0, 10, "Amazon Full-Funnel Simulation Report", ln=True, align='C')
-            pdf.set_font("Arial", size=10)
-            pdf.cell(0, 10, f"Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
-            pdf.ln(10)
-            
-            # Executive Summary
-            pdf.set_font("Arial", 'B', 14)
-            pdf.cell(0, 10, "Executive Summary (Variant B)", ln=True)
-            pdf.set_font("Arial", size=11)
-            pdf.cell(0, 8, f"Avg SEO Score: {final_metrics.loc['Variant B', 'SEO_Score']}/100", ln=True)
-            pdf.cell(0, 8, f"Avg CTR Score: {final_metrics.loc['Variant B', 'CTR_Score']}/100", ln=True)
-            pdf.cell(0, 8, f"PDP Conversion Rate: {final_metrics.loc['Variant B', 'CVR (%)']}%", ln=True)
-            pdf.cell(0, 8, f"Total Projected Sales Lift: {total_lift:+.2f}%", ln=True)
-            pdf.ln(10)
-            
-            # Keyword Breakdown
-            pdf.set_font("Arial", 'B', 14)
-            pdf.cell(0, 10, "Keyword-by-Keyword SERP Breakdown", ln=True)
-            pdf.set_font("Arial", size=9)
-            
-            # Table Header
-            pdf.set_fill_color(200, 220, 255)
-            pdf.cell(40, 8, "Keyword", 1, 0, 'C', True)
-            pdf.cell(30, 8, "Variant", 1, 0, 'C', True)
-            pdf.cell(20, 8, "SEO", 1, 0, 'C', True)
-            pdf.cell(20, 8, "CTR", 1, 0, 'C', True)
-            pdf.cell(80, 8, "Reason", 1, 1, 'C', True)
-            
-            # Table Rows
-            for index, row in df_seo.iterrows():
-                reason = str(row['Reason'])[:50] + "..." if len(str(row['Reason'])) > 50 else str(row['Reason'])
-                pdf.cell(40, 8, str(row['Keyword'])[:20], 1, 0, 'L')
-                pdf.cell(30, 8, str(row['Variant']), 1, 0, 'L')
-                pdf.cell(20, 8, str(row['SEO_Score']), 1, 0, 'C')
-                pdf.cell(20, 8, str(row['CTR_Score']), 1, 0, 'C')
-                pdf.cell(80, 8, reason, 1, 1, 'L')
-                
-            return pdf.output()
+        st.session_state['pdf_bytes'] = pdf.output()
 
-        pdf_data = create_pdf()
+# ==========================================
+# DISPLAY RESULTS (Survives Refresh)
+# ==========================================
+if st.session_state.get('last_metrics'):
+    fm = st.session_state['last_metrics']['final_metrics']
+    tl = st.session_state['last_metrics']['total_lift']
+    df_seo_display = st.session_state['last_metrics']['df_seo']
+
+    st.markdown("### 📊 FULL-FUNNEL EXECUTIVE SUMMARY")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Avg SEO Score", f"{fm.loc['Variant B', 'SEO_Score']}/100", f"{fm.loc['Variant B', 'SEO_Score'] - fm.loc['Variant A', 'SEO_Score']:+.1f} vs A")
+    col2.metric("Avg CTR Score", f"{fm.loc['Variant B', 'CTR_Score']}/100", f"{fm.loc['Variant B', 'CTR_Score'] - fm.loc['Variant A', 'CTR_Score']:+.1f} vs A")
+    col3.metric("PDP Conv. Rate", f"{fm.loc['Variant B', 'CVR (%)']}%", f"{fm.loc['Variant B', 'CVR (%)'] - fm.loc['Variant A', 'CVR (%)']:+.2f}% vs A")
+    col4.metric("Total Sales Lift", f"{tl:+.2f}%", "CTR x CVR Impact")
+
+    if tl > 5: st.success("✅ **DEPLOY VARIANT B** - Strong positive signal across the full funnel.")
+    elif tl > 0: st.warning("⚠️ **MARGINAL IMPROVEMENT** - Consider testing on Amazon.")
+    else: st.error("❌ **STICK WITH VARIANT A** - Test variant underperformed.")
+
+    st.markdown("### 🔍 Keyword-by-Keyword SERP Breakdown")
+    st.dataframe(df_seo_display)
+    
+    if st.session_state.get('pdf_bytes'):
         st.download_button(
             label="📄 Download Full PDF Report",
-            data=pdf_data,
+            data=st.session_state['pdf_bytes'],
             file_name="amazon_simulation_report.pdf",
-            mime="application/pdf"
+            mime="application/pdf",
+            use_container_width=True
         )
+else:
+    st.info("👈 Run a simulation to see results and generate a PDF.")
