@@ -17,8 +17,10 @@ if 'pdf_bytes' not in st.session_state:
     st.session_state['pdf_bytes'] = None
 if 'last_metrics' not in st.session_state:
     st.session_state['last_metrics'] = None
+if 'pdf_ready' not in st.session_state:
+    st.session_state['pdf_ready'] = False
 
-st.title(" Amazon Full-Funnel SERP & PDP Simulator")
+st.title("🛒 Amazon Full-Funnel SERP & PDP Simulator")
 st.markdown("Simulate the entire customer journey: From Search Results (SEO/CTR) to Product Page (Conversion).")
 
 # ==========================================
@@ -63,14 +65,23 @@ def scrape_amazon(url):
         return full_title, bullets[:5] 
     except: return "", []
 
-def strip_emojis(text):
+# THE MAGIC FIX: Sanitize text for PDF
+def clean_text(text):
+    if not text: return ""
+    text = str(text)
+    # Replace Amazon's special unicode characters with safe ASCII
+    text = text.replace('•', '-').replace('—', '-').replace('–', '-')
+    text = text.replace('“', '"').replace('”', '"').replace('‘', "'").replace('’', "'")
+    # Remove emojis
     emoji_pattern = re.compile("["
         u"\U0001F600-\U0001F64F"
         u"\U0001F300-\U0001F5FF"
         u"\U0001F680-\U0001F6FF"
         u"\U0001F1E0-\U0001F1FF"
         "]+", flags=re.UNICODE)
-    return emoji_pattern.sub(r'', str(text))
+    text = emoji_pattern.sub(r'', text)
+    # Encode to ASCII, ignoring anything else that might break the PDF
+    return text.encode('ascii', 'ignore').decode('ascii')
 
 # ==========================================
 # MAIN INPUTS
@@ -80,7 +91,7 @@ col_p1, col_p2 = st.columns(2)
 with col_p1: a_price = st.text_input("Price (Variant A)", value="$37.61")
 with col_p2: b_price = st.text_input("Price (Variant B)", value="$29.99")
 
-keywords_input = st.text_area("🎯 Target Search Keywords (Comma-separated, up to 10)", 
+keywords_input = st.text_area(" Target Search Keywords (Comma-separated, up to 10)", 
                               value="metal shoe rack, shoe organizer for closet, 5 tier shoe rack, stackable shoe shelf", 
                               height=80)
 keywords = [k.strip() for k in keywords_input.split(',') if k.strip()][:10]
@@ -91,7 +102,7 @@ price_diff = get_price_diff(a_price, b_price)
 if price_diff > 0: st.info(f"💡 Variant B is **{price_diff}% cheaper** than Variant A.")
 st.markdown("---")
 
-st.subheader("️ Auto-Fill Variant A from URL")
+st.subheader("🕷️ Auto-Fill Variant A from URL")
 col_url, col_btn = st.columns([3, 1])
 with col_url: amazon_url = st.text_input("Paste Amazon Product URL", placeholder="https://www.amazon.com/dp/...")
 with col_btn:
@@ -279,47 +290,48 @@ if st.button("🚀 Run Full-Funnel Simulation", type="primary", use_container_wi
             'df_seo': df_seo
         }
 
-        # --- PDF GENERATION ---
+        # --- PDF GENERATION (WITH SANITIZATION) ---
         try:
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("Arial", size=12)
             
             pdf.set_font("Arial", 'B', 16)
-            pdf.cell(0, 10, "Amazon Full-Funnel Simulation Report", ln=True, align='C')
+            pdf.cell(0, 10, clean_text("Amazon Full-Funnel Simulation Report"), ln=True, align='C')
             pdf.set_font("Arial", size=10)
-            pdf.cell(0, 10, f"Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
+            pdf.cell(0, 10, clean_text(f"Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"), ln=True, align='C')
             pdf.ln(10)
             
             pdf.set_font("Arial", 'B', 14)
-            pdf.cell(0, 10, "Executive Summary (Variant B)", ln=True)
+            pdf.cell(0, 10, clean_text("Executive Summary (Variant B)"), ln=True)
             pdf.set_font("Arial", size=11)
-            pdf.cell(0, 8, f"Avg SEO Score: {final_metrics.loc['Variant B', 'SEO_Score']}/100", ln=True)
-            pdf.cell(0, 8, f"Avg CTR Score: {final_metrics.loc['Variant B', 'CTR_Score']}/100", ln=True)
-            pdf.cell(0, 8, f"PDP Conversion Rate: {final_metrics.loc['Variant B', 'CVR (%)']}%", ln=True)
-            pdf.cell(0, 8, f"Total Projected Sales Lift: {total_lift:+.2f}%", ln=True)
+            pdf.cell(0, 8, clean_text(f"Avg SEO Score: {final_metrics.loc['Variant B', 'SEO_Score']}/100"), ln=True)
+            pdf.cell(0, 8, clean_text(f"Avg CTR Score: {final_metrics.loc['Variant B', 'CTR_Score']}/100"), ln=True)
+            pdf.cell(0, 8, clean_text(f"PDP Conversion Rate: {final_metrics.loc['Variant B', 'CVR (%)']}%"), ln=True)
+            pdf.cell(0, 8, clean_text(f"Total Projected Sales Lift: {total_lift:+.2f}%"), ln=True)
             pdf.ln(10)
             
             pdf.set_font("Arial", 'B', 14)
-            pdf.cell(0, 10, "Keyword-by-Keyword SERP Breakdown", ln=True)
+            pdf.cell(0, 10, clean_text("Keyword-by-Keyword SERP Breakdown"), ln=True)
             pdf.set_font("Arial", size=9)
             
             pdf.set_fill_color(200, 220, 255)
-            pdf.cell(40, 8, "Keyword", 1, 0, 'C', True)
-            pdf.cell(30, 8, "Variant", 1, 0, 'C', True)
-            pdf.cell(20, 8, "SEO", 1, 0, 'C', True)
-            pdf.cell(20, 8, "CTR", 1, 0, 'C', True)
-            pdf.cell(70, 8, "Reason", 1, 1, 'C', True)
+            pdf.cell(40, 8, clean_text("Keyword"), 1, 0, 'C', True)
+            pdf.cell(30, 8, clean_text("Variant"), 1, 0, 'C', True)
+            pdf.cell(20, 8, clean_text("SEO"), 1, 0, 'C', True)
+            pdf.cell(20, 8, clean_text("CTR"), 1, 0, 'C', True)
+            pdf.cell(70, 8, clean_text("Reason"), 1, 1, 'C', True)
             
             for index, row in df_seo.iterrows():
-                reason = strip_emojis(str(row['Reason']))[:45] + "..." if len(str(row['Reason'])) > 45 else strip_emojis(str(row['Reason']))
-                pdf.cell(40, 8, strip_emojis(str(row['Keyword']))[:20], 1, 0, 'L')
-                pdf.cell(30, 8, str(row['Variant']), 1, 0, 'L')
-                pdf.cell(20, 8, str(row['SEO_Score']), 1, 0, 'C')
-                pdf.cell(20, 8, str(row['CTR_Score']), 1, 0, 'C')
+                reason = clean_text(str(row['Reason']))[:45] + "..." if len(str(row['Reason'])) > 45 else clean_text(str(row['Reason']))
+                pdf.cell(40, 8, clean_text(str(row['Keyword']))[:20], 1, 0, 'L')
+                pdf.cell(30, 8, clean_text(str(row['Variant'])), 1, 0, 'L')
+                pdf.cell(20, 8, clean_text(str(row['SEO_Score'])), 1, 0, 'C')
+                pdf.cell(20, 8, clean_text(str(row['CTR_Score'])), 1, 0, 'C')
                 pdf.cell(70, 8, reason, 1, 1, 'L')
                 
-            st.session_state['pdf_bytes'] = pdf.output()
+            # CRITICAL FIX: Encode output to latin-1 so Streamlit can read it as bytes
+            st.session_state['pdf_bytes'] = pdf.output(dest='S').encode('latin-1')
             st.session_state['pdf_ready'] = True
         except Exception as e:
             st.error(f"PDF generation failed: {e}")
@@ -342,7 +354,7 @@ if st.session_state.get('last_metrics'):
 
     if tl > 5: st.success("✅ **DEPLOY VARIANT B** - Strong positive signal across the full funnel.")
     elif tl > 0: st.warning("⚠️ **MARGINAL IMPROVEMENT** - Consider testing on Amazon.")
-    else: st.error("❌ **STICK WITH VARIANT A** - Test variant underperformed.")
+    else: st.error(" **STICK WITH VARIANT A** - Test variant underperformed.")
 
     st.markdown("### 🔍 Keyword-by-Keyword SERP Breakdown")
     st.dataframe(df_seo_display)
@@ -361,4 +373,4 @@ if st.session_state.get('last_metrics'):
     else:
         st.warning("⚠️ PDF generation failed. Please check for special characters in your input.")
 else:
-    st.info(" Run a simulation to see results and generate a PDF.")
+    st.info("👈 Run a simulation to see results and generate a PDF.")
