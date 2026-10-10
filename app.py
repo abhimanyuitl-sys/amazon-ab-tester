@@ -5,6 +5,8 @@ import re
 import cloudscraper
 from bs4 import BeautifulSoup
 from openai import OpenAI
+from fpdf import FPDF
+import datetime
 
 # ==========================================
 # PAGE CONFIGURATION
@@ -64,13 +66,12 @@ col_p1, col_p2 = st.columns(2)
 with col_p1: a_price = st.text_input("Price (Variant A)", value="$37.61")
 with col_p2: b_price = st.text_input("Price (Variant B)", value="$29.99")
 
-# NEW: Keyword Input
 keywords_input = st.text_area("🎯 Target Search Keywords (Comma-separated, up to 10)", 
                               value="metal shoe rack, shoe organizer for closet, 5 tier shoe rack, stackable shoe shelf", 
                               height=80)
 keywords = [k.strip() for k in keywords_input.split(',') if k.strip()][:10]
 if keywords:
-    st.info(f"🔍 Simulating SERP for **{len(keywords)}** keywords: {', '.join(keywords)}")
+    st.info(f" Simulating SERP for **{len(keywords)}** keywords: {', '.join(keywords)}")
 
 price_diff = get_price_diff(a_price, b_price)
 if price_diff > 0: st.info(f"💡 Variant B is **{price_diff}% cheaper** than Variant A.")
@@ -252,10 +253,7 @@ if st.button("🚀 Run Full-Funnel Simulation", type="primary", use_container_wi
         ).round(2)
         cvr_summary['CVR (%)'] = (cvr_summary['Add_to_Cart'] / cvr_summary['Total'] * 100).round(2)
         
-        # Merge SEO and CVR data
         final_metrics = seo_summary.join(cvr_summary[['CVR (%)']])
-        
-        # Calculate Total Sales Impact (CTR * CVR)
         final_metrics['Projected_Sales_Index'] = (final_metrics['CTR_Score'] * final_metrics['CVR (%)']).round(2)
         
         a_sales = final_metrics.loc['Variant A', 'Projected_Sales_Index']
@@ -276,4 +274,57 @@ if st.button("🚀 Run Full-Funnel Simulation", type="primary", use_container_wi
         st.markdown("### 🔍 Keyword-by-Keyword SERP Breakdown")
         st.dataframe(df_seo)
         
-        st.download_button("💾 Download Full Data", df_seo.to_csv(index=False) + "\n" + df_cvr.to_csv(index=False), file_name="full_funnel_results.csv", mime="text/csv")
+        # --- PDF GENERATION ---
+        def create_pdf():
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            
+            # Header
+            pdf.set_font("Arial", 'B', 16)
+            pdf.cell(0, 10, "Amazon Full-Funnel Simulation Report", ln=True, align='C')
+            pdf.set_font("Arial", size=10)
+            pdf.cell(0, 10, f"Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
+            pdf.ln(10)
+            
+            # Executive Summary
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(0, 10, "Executive Summary (Variant B)", ln=True)
+            pdf.set_font("Arial", size=11)
+            pdf.cell(0, 8, f"Avg SEO Score: {final_metrics.loc['Variant B', 'SEO_Score']}/100", ln=True)
+            pdf.cell(0, 8, f"Avg CTR Score: {final_metrics.loc['Variant B', 'CTR_Score']}/100", ln=True)
+            pdf.cell(0, 8, f"PDP Conversion Rate: {final_metrics.loc['Variant B', 'CVR (%)']}%", ln=True)
+            pdf.cell(0, 8, f"Total Projected Sales Lift: {total_lift:+.2f}%", ln=True)
+            pdf.ln(10)
+            
+            # Keyword Breakdown
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(0, 10, "Keyword-by-Keyword SERP Breakdown", ln=True)
+            pdf.set_font("Arial", size=9)
+            
+            # Table Header
+            pdf.set_fill_color(200, 220, 255)
+            pdf.cell(40, 8, "Keyword", 1, 0, 'C', True)
+            pdf.cell(30, 8, "Variant", 1, 0, 'C', True)
+            pdf.cell(20, 8, "SEO", 1, 0, 'C', True)
+            pdf.cell(20, 8, "CTR", 1, 0, 'C', True)
+            pdf.cell(80, 8, "Reason", 1, 1, 'C', True)
+            
+            # Table Rows
+            for index, row in df_seo.iterrows():
+                reason = str(row['Reason'])[:50] + "..." if len(str(row['Reason'])) > 50 else str(row['Reason'])
+                pdf.cell(40, 8, str(row['Keyword'])[:20], 1, 0, 'L')
+                pdf.cell(30, 8, str(row['Variant']), 1, 0, 'L')
+                pdf.cell(20, 8, str(row['SEO_Score']), 1, 0, 'C')
+                pdf.cell(20, 8, str(row['CTR_Score']), 1, 0, 'C')
+                pdf.cell(80, 8, reason, 1, 1, 'L')
+                
+            return pdf.output()
+
+        pdf_data = create_pdf()
+        st.download_button(
+            label="📄 Download Full PDF Report",
+            data=pdf_data,
+            file_name="amazon_simulation_report.pdf",
+            mime="application/pdf"
+        )
