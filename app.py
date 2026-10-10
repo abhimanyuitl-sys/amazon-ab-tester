@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import json
 import re
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 from openai import OpenAI
 
@@ -20,10 +20,7 @@ st.markdown("Run thousands of synthetic shoppers against your Amazon listings in
 with st.sidebar:
     st.header("⚙️ Settings")
     api_key = st.text_input("OpenAI API Key", type="password", help="Your key starts with sk-...")
-    
-    # UPDATED: 3 Options now
     test_type = st.radio("What do you want to test?", ["Title", "Bullet Points", "Title + Bullet Points"], horizontal=False)
-    
     persona_count = st.slider("Number of Personas", 50, 1000, 100, step=50)
     st.caption("💡 Cost estimate: ~$0.01 per 50 personas.")
 
@@ -40,9 +37,15 @@ def get_price_diff(p1, p2):
         return 0
 
 def scrape_amazon(url):
+    # Create a scraper that mimics a real browser
+    scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-        response = requests.get(url, headers=headers, timeout=10)
+        response = scraper.get(url, timeout=15)
+        
+        # Check if we got blocked (Amazon returns 503 or a CAPTCHA page)
+        if response.status_code != 200 or "captcha" in response.text.lower():
+            return "", []
+            
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Try to find title
@@ -58,14 +61,13 @@ def scrape_amazon(url):
                 if span and span.get_text(strip=True):
                     bullets.append(span.get_text(strip=True))
         
-        return title, bullets[:5] # Return max 5 bullets
+        return title, bullets[:5] 
     except Exception as e:
         return "", []
 
 # ==========================================
 # MAIN INPUTS
 # ==========================================
-# Prices
 st.subheader("💰 Pricing")
 col_p1, col_p2 = st.columns(2)
 with col_p1:
@@ -81,39 +83,36 @@ elif price_diff < 0:
 
 st.markdown("---")
 
-# URL Auto-Fill Section
-st.subheader(" Auto-Fill Variant A from URL")
-st.caption("Note: Amazon sometimes blocks automated scraping. If it fails, just paste manually!")
+st.subheader("🕷️ Auto-Fill Variant A from URL")
+st.caption("Note: Amazon has strict security. If it fails, just paste manually!")
 col_url, col_btn = st.columns([3, 1])
 with col_url:
     amazon_url = st.text_input("Paste Amazon Product URL", placeholder="https://www.amazon.com/dp/...")
 with col_btn:
-    st.write("") # Spacer
-    st.write("") # Spacer
+    st.write("") 
+    st.write("") 
     scrape_clicked = st.button("🕷️ Auto-Fill", use_container_width=True)
 
 if scrape_clicked and amazon_url:
-    with st.spinner("Scraping Amazon..."):
+    with st.spinner("Bypassing security and scraping..."):
         scraped_title, scraped_bullets = scrape_amazon(amazon_url)
         if scraped_title:
             st.session_state['scraped_title'] = scraped_title
             st.session_state['scraped_bullets'] = scraped_bullets
             st.success(f"✅ Scraped Title and {len(scraped_bullets)} Bullets!")
         else:
-            st.error("❌ Could not scrape. Amazon likely blocked the request. Please paste manually.")
+            st.error("❌ Amazon blocked the request. Please paste manually.")
 
-# Initialize session state for scraped data
 if 'scraped_title' not in st.session_state:
     st.session_state['scraped_title'] = ""
 if 'scraped_bullets' not in st.session_state:
     st.session_state['scraped_bullets'] = ["", "", "", "", ""]
 
-# Pad bullets list to 5 if needed
 while len(st.session_state['scraped_bullets']) < 5:
     st.session_state['scraped_bullets'].append("")
 
 # ==========================================
-# DYNAMIC INPUTS BASED ON TEST TYPE
+# DYNAMIC INPUTS
 # ==========================================
 content_a = ""
 content_b = ""
@@ -123,10 +122,10 @@ if test_type == "Title":
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("📝 Current Title (Variant A)")
-        a_title = st.text_area("Title A", height=70, value=st.session_state['scraped_title'], placeholder="Paste current title here...")
+        a_title = st.text_area("Title A", height=70, value=st.session_state['scraped_title'])
     with col2:
         st.subheader("🧪 Test Title (Variant B)")
-        b_title = st.text_area("Title B", height=70, placeholder="Paste test title here...")
+        b_title = st.text_area("Title B", height=70)
     content_a = a_title
     content_b = b_title
     content_label = "TITLE"
@@ -134,7 +133,7 @@ if test_type == "Title":
 elif test_type == "Bullet Points":
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader(" Current Bullets (Variant A)")
+        st.subheader("📝 Current Bullets (Variant A)")
         a_b1 = st.text_area("Bullet 1", height=60, value=st.session_state['scraped_bullets'][0])
         a_b2 = st.text_area("Bullet 2", height=60, value=st.session_state['scraped_bullets'][1])
         a_b3 = st.text_area("Bullet 3", height=60, value=st.session_state['scraped_bullets'][2])
@@ -143,7 +142,7 @@ elif test_type == "Bullet Points":
         variant_a_bullets = [a_b1, a_b2, a_b3, a_b4, a_b5]
         content_a = "\n".join([f"• {b}" for b in variant_a_bullets if b.strip()])
     with col2:
-        st.subheader("🧪 Test Bullets (Variant B)")
+        st.subheader(" Test Bullets (Variant B)")
         b_b1 = st.text_area("Bullet 1", height=60, key="b1")
         b_b2 = st.text_area("Bullet 2", height=60, key="b2")
         b_b3 = st.text_area("Bullet 3", height=60, key="b3")
@@ -153,7 +152,7 @@ elif test_type == "Bullet Points":
         content_b = "\n".join([f"• {b}" for b in variant_b_bullets if b.strip()])
     content_label = "KEY FEATURES"
 
-else: # Title + Bullet Points
+else: 
     st.subheader("📝 Current Listing (Variant A)")
     a_title = st.text_area("Title A", height=70, value=st.session_state['scraped_title'])
     a_b1 = st.text_area("Bullet 1", height=60, value=st.session_state['scraped_bullets'][0])
@@ -186,8 +185,7 @@ if st.button("🚀 Run Synthetic Test", type="primary", use_container_width=True
     else:
         client = OpenAI(api_key=api_key)
         
-        # 1. Generate Personas
-        with st.spinner(f"🤖 Generating {persona_count} synthetic shoppers..."):
+        with st.spinner(f" Generating {persona_count} synthetic shoppers..."):
             personas = []
             batch_size = 25 
             batches = (persona_count // batch_size) + 1
@@ -220,7 +218,6 @@ if st.button("🚀 Run Synthetic Test", type="primary", use_container_width=True
             
         st.success(f"✅ Generated {len(personas)} personas. Starting simulation...")
         
-        # 2. Run Simulations
         progress_bar = st.progress(0)
         status_text = st.empty()
         results = []
@@ -265,7 +262,6 @@ if st.button("🚀 Run Synthetic Test", type="primary", use_container_width=True
                 progress_bar.progress(current_task / total_tasks)
                 status_text.text(f"Processing shopper {current_task} of {total_tasks}...")
 
-        # 3. Display Results
         status_text.text("✅ Simulation complete! Analyzing data...")
         df = pd.DataFrame(results)
         
