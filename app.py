@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import json
 import re
+import requests
+from bs4 import BeautifulSoup
 from openai import OpenAI
 
 # ==========================================
@@ -18,22 +20,16 @@ st.markdown("Run thousands of synthetic shoppers against your Amazon listings in
 with st.sidebar:
     st.header("⚙️ Settings")
     api_key = st.text_input("OpenAI API Key", type="password", help="Your key starts with sk-...")
-    test_type = st.radio("What do you want to test?", ["Bullet Points", "Title"], horizontal=True)
+    
+    # UPDATED: 3 Options now
+    test_type = st.radio("What do you want to test?", ["Title", "Bullet Points", "Title + Bullet Points"], horizontal=False)
+    
     persona_count = st.slider("Number of Personas", 50, 1000, 100, step=50)
     st.caption("💡 Cost estimate: ~$0.01 per 50 personas.")
 
 # ==========================================
-# MAIN INPUTS
+# HELPER FUNCTIONS
 # ==========================================
-# Prices (Always visible)
-st.subheader("💰 Pricing")
-col_p1, col_p2 = st.columns(2)
-with col_p1:
-    a_price = st.text_input("Price (Variant A)", value="$37.61")
-with col_p2:
-    b_price = st.text_input("Price (Variant B)", value="$29.99")
-
-# Helper to calculate price difference
 def get_price_diff(p1, p2):
     try:
         num1 = float(re.sub(r'[^\d.]', '', p1))
@@ -43,37 +39,107 @@ def get_price_diff(p1, p2):
     except:
         return 0
 
+def scrape_amazon(url):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Try to find title
+        title_tag = soup.find('span', {'id': 'productTitle'})
+        title = title_tag.get_text(strip=True) if title_tag else ""
+        
+        # Try to find bullets
+        bullets = []
+        bullet_container = soup.find('div', {'id': 'feature-bullets'})
+        if bullet_container:
+            for li in bullet_container.find_all('li'):
+                span = li.find('span', {'class': 'a-list-item'})
+                if span and span.get_text(strip=True):
+                    bullets.append(span.get_text(strip=True))
+        
+        return title, bullets[:5] # Return max 5 bullets
+    except Exception as e:
+        return "", []
+
+# ==========================================
+# MAIN INPUTS
+# ==========================================
+# Prices
+st.subheader("💰 Pricing")
+col_p1, col_p2 = st.columns(2)
+with col_p1:
+    a_price = st.text_input("Price (Variant A)", value="$37.61")
+with col_p2:
+    b_price = st.text_input("Price (Variant B)", value="$29.99")
+
 price_diff = get_price_diff(a_price, b_price)
 if price_diff > 0:
     st.info(f"💡 Variant B is **{price_diff}% cheaper** than Variant A.")
 elif price_diff < 0:
     st.warning(f"⚠️ Variant B is **{abs(price_diff)}% more expensive** than Variant A.")
-else:
-    st.info("💡 Both variants have the same price.")
 
 st.markdown("---")
 
-# Dynamic Inputs based on Test Type
+# URL Auto-Fill Section
+st.subheader(" Auto-Fill Variant A from URL")
+st.caption("Note: Amazon sometimes blocks automated scraping. If it fails, just paste manually!")
+col_url, col_btn = st.columns([3, 1])
+with col_url:
+    amazon_url = st.text_input("Paste Amazon Product URL", placeholder="https://www.amazon.com/dp/...")
+with col_btn:
+    st.write("") # Spacer
+    st.write("") # Spacer
+    scrape_clicked = st.button("🕷️ Auto-Fill", use_container_width=True)
+
+if scrape_clicked and amazon_url:
+    with st.spinner("Scraping Amazon..."):
+        scraped_title, scraped_bullets = scrape_amazon(amazon_url)
+        if scraped_title:
+            st.session_state['scraped_title'] = scraped_title
+            st.session_state['scraped_bullets'] = scraped_bullets
+            st.success(f"✅ Scraped Title and {len(scraped_bullets)} Bullets!")
+        else:
+            st.error("❌ Could not scrape. Amazon likely blocked the request. Please paste manually.")
+
+# Initialize session state for scraped data
+if 'scraped_title' not in st.session_state:
+    st.session_state['scraped_title'] = ""
+if 'scraped_bullets' not in st.session_state:
+    st.session_state['scraped_bullets'] = ["", "", "", "", ""]
+
+# Pad bullets list to 5 if needed
+while len(st.session_state['scraped_bullets']) < 5:
+    st.session_state['scraped_bullets'].append("")
+
+# ==========================================
+# DYNAMIC INPUTS BASED ON TEST TYPE
+# ==========================================
+content_a = ""
+content_b = ""
+content_label = ""
+
 if test_type == "Title":
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("📝 Current Title (Variant A)")
-        a_title = st.text_area("Title A", height=70, placeholder="Paste current title here...")
+        a_title = st.text_area("Title A", height=70, value=st.session_state['scraped_title'], placeholder="Paste current title here...")
     with col2:
         st.subheader("🧪 Test Title (Variant B)")
         b_title = st.text_area("Title B", height=70, placeholder="Paste test title here...")
     content_a = a_title
     content_b = b_title
     content_label = "TITLE"
-else: 
+
+elif test_type == "Bullet Points":
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("📝 Current Bullets (Variant A)")
-        a_b1 = st.text_area("Bullet 1", height=60)
-        a_b2 = st.text_area("Bullet 2", height=60)
-        a_b3 = st.text_area("Bullet 3", height=60)
-        a_b4 = st.text_area("Bullet 4", height=60)
-        a_b5 = st.text_area("Bullet 5", height=60)
+        st.subheader(" Current Bullets (Variant A)")
+        a_b1 = st.text_area("Bullet 1", height=60, value=st.session_state['scraped_bullets'][0])
+        a_b2 = st.text_area("Bullet 2", height=60, value=st.session_state['scraped_bullets'][1])
+        a_b3 = st.text_area("Bullet 3", height=60, value=st.session_state['scraped_bullets'][2])
+        a_b4 = st.text_area("Bullet 4", height=60, value=st.session_state['scraped_bullets'][3])
+        a_b5 = st.text_area("Bullet 5", height=60, value=st.session_state['scraped_bullets'][4])
         variant_a_bullets = [a_b1, a_b2, a_b3, a_b4, a_b5]
         content_a = "\n".join([f"• {b}" for b in variant_a_bullets if b.strip()])
     with col2:
@@ -87,10 +153,32 @@ else:
         content_b = "\n".join([f"• {b}" for b in variant_b_bullets if b.strip()])
     content_label = "KEY FEATURES"
 
+else: # Title + Bullet Points
+    st.subheader("📝 Current Listing (Variant A)")
+    a_title = st.text_area("Title A", height=70, value=st.session_state['scraped_title'])
+    a_b1 = st.text_area("Bullet 1", height=60, value=st.session_state['scraped_bullets'][0])
+    a_b2 = st.text_area("Bullet 2", height=60, value=st.session_state['scraped_bullets'][1])
+    a_b3 = st.text_area("Bullet 3", height=60, value=st.session_state['scraped_bullets'][2])
+    a_b4 = st.text_area("Bullet 4", height=60, value=st.session_state['scraped_bullets'][3])
+    a_b5 = st.text_area("Bullet 5", height=60, value=st.session_state['scraped_bullets'][4])
+    variant_a_bullets = [a_b1, a_b2, a_b3, a_b4, a_b5]
+    content_a = f"TITLE: {a_title}\n\nBULLET POINTS:\n" + "\n".join([f"• {b}" for b in variant_a_bullets if b.strip()])
+
+    st.subheader("🧪 Test Listing (Variant B)")
+    b_title = st.text_area("Title B", height=70, key="b_title")
+    b_b1 = st.text_area("Bullet 1", height=60, key="b1")
+    b_b2 = st.text_area("Bullet 2", height=60, key="b2")
+    b_b3 = st.text_area("Bullet 3", height=60, key="b3")
+    b_b4 = st.text_area("Bullet 4", height=60, key="b4")
+    b_b5 = st.text_area("Bullet 5", height=60, key="b5")
+    variant_b_bullets = [b_b1, b_b2, b_b3, b_b4, b_b5]
+    content_b = f"TITLE: {b_title}\n\nBULLET POINTS:\n" + "\n".join([f"• {b}" for b in variant_b_bullets if b.strip()])
+    content_label = "LISTING DETAILS"
+
 # ==========================================
 # RUN SIMULATION
 # ==========================================
-if st.button(" Run Synthetic Test", type="primary", use_container_width=True):
+if st.button("🚀 Run Synthetic Test", type="primary", use_container_width=True):
     if not api_key.startswith("sk-"):
         st.error("Please enter a valid OpenAI API Key in the sidebar.")
     elif not content_a.strip() or not content_b.strip():
@@ -146,10 +234,9 @@ if st.button(" Run Synthetic Test", type="primary", use_container_width=True):
 
         for persona_obj in personas:
             persona_text = persona_obj.get("persona", "Unknown shopper")
-            price_sens = persona_obj.get("price_sensitivity", "Medium") # Fixed variable name
+            price_sens = persona_obj.get("price_sensitivity", "Medium")
             
             for variant in variants:
-                # STRONGER LOGIC PROMPT
                 prompt = f"""You are an Amazon shopper: {persona_text}
                 Your shopping trait: You are '{price_sens}' price sensitive. 
                 
